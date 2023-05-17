@@ -1868,3 +1868,4 @@ class ZHPJ(BaseGenerator):
 
     def map_data(self, x, *args):
         pass
+
