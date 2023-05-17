@@ -1,0 +1,9 @@
+README.md
+setup.py
+src/transformers.egg-info/PKG-INFO
+src/transformers.egg-info/SOURCES.txt
+src/transformers.egg-info/dependency_links.txt
+src/transformers.egg-info/entry_points.txt
+src/transformers.egg-info/not-zip-safe
+src/transformers.egg-info/requires.txt
+src/transformers.egg-info/top_level.txt
