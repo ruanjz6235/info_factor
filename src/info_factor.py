@@ -4,6 +4,7 @@ import torch
 import re
 from DataAPI.openapi.open_api import OpenAPI
 from functools import reduce
+from backtest import backtest
 # from const import periods
 periods = [1, 3, 5, 10, 20]
 
@@ -29,16 +30,21 @@ class BaseGenerator:
         self.map_tp = 'df'
         self.lst_tp = 'df'  # 'df' or 'price'
 
-    def get_price(self):
-        self.stock_detail = query_iwencai("上市日期小于等于%s" % pd.to_datetime('today').strftime("%Y-%m-%d"))
-        self.stock_list = list(set(self.stock_detail['股票代码']))
-        price_detail = get_price(self.stock_list,
-                                 self.dates[0],
-                                 self.dates[1],
-                                 '1d',
-                                 ['open', 'close'],
-                                 fq='pre')
-        self.price_detail = pd.concat(price_detail)
+    def get_price(self, price_df=None, stock_detail=None, stock_list=None):
+        if price_df is not None:
+            self.stock_detail = stock_detail.copy()
+            self.stock_list = stock_list
+            self.price_detail = price_df.copy()
+        else:
+            self.stock_detail = query_iwencai("上市日期小于%s" % pd.to_datetime('today').strftime("%Y-%m-%d"))
+            self.stock_list = list(set(self.stock_detail['股票代码']))
+            price_detail = get_price(self.stock_list,
+                                     self.dates[0],
+                                     self.dates[1],
+                                     '1d',
+                                     ['open', 'close'],
+                                     fq='pre')
+            self.price_detail = pd.concat(price_detail)
         self.tradeday = self.price_detail.index
 
     def get_nfq_prev_close(self):
@@ -55,12 +61,14 @@ class BaseGenerator:
         # prev_close = self.price_detail_nfq['prev_close'].unstack([-2])
         return open_price.unstack([-2]).ffill(), close_price.unstack([-2]).ffill()
 
-    def get_type_ret(self):
+    def get_type_ret(self, stock_df):
         open_price, close_price = self._get_type_price()
         ret = []
         for period in periods:
             open_ret = (open_price.shift(-period) / open_price).stack().rename(f'{period}_open')
             close_ret = (close_price.shift(-period) / close_price).stack().rename(f'{period}_close')
+            open_ret = open_ret[open_ret.index.isin(list(zip(stock_df['date'], stock_df['stock_code'])))]
+            close_ret = close_ret[close_ret.index.isin(list(zip(stock_df['date'], stock_df['stock_code'])))]
             ret.extend([open_ret, close_ret])
         ret = pd.concat(ret, axis=1)
         ret.index.names = ['date', 'stock_code']
@@ -137,13 +145,13 @@ class BaseGenerator:
         next_day = tmp_new.apply(get_first_date).rename('date').reset_index()
         return next_day
 
-    def get_next_ret(self):
-        next_day = self.get_next_day(self.stock_df[['stock_code', 'date']])
+    def get_next_ret(self, stock_df):
+        next_day = self.get_next_day(stock_df[['stock_code', 'date']])
         next_day.columns = ['stock_code', 'date', 'date_new']
-        stock_df = self.stock_df.merge(next_day, on=['stock_code', 'date'], how='inner')[
+        stock_df = stock_df.merge(next_day, on=['stock_code', 'date'], how='inner')[
             ['stock_code', 'date_new', 'score']].rename(columns={'date_new': 'date'})
         stock_df = stock_df[~stock_df['date'].isna()]
-        ret = self.get_type_ret()
+        ret = self.get_type_ret(stock_df)
         df_ret = stock_df.merge(ret, on=['stock_code', 'date'], how='left')
         return df_ret
 
@@ -155,10 +163,9 @@ class BaseGenerator:
             s = pd.concat({'s1': s1, 's2': s2, 's3': s3})
             return s
 
-        df_ret_index = df_ret.groupby(['score']).apply(get_index).stack([-2]).reset_index()
+        df_ret_index = df_ret.groupby(['score'])[df_ret.columns[3:]].apply(get_index).stack([-2]).reset_index()
         count_df = df_ret_index['score'].describe()
         return df_ret_index, count_df
-
 
 
 # %%重大合同
@@ -168,6 +175,7 @@ class ZDHT(BaseGenerator):
         super(ZDHT, self).__init__(sentence="{start_date}以来，重大合同发布时间，重大合同金额", dates=dates)
         self.wencai_data = True
         self.col = ['股票代码', '股票简称', '重大合同发布时间']
+        self.map_tp = 'series'
 
     @staticmethod
     def get_total_income(stock_df):
@@ -1868,3 +1876,81 @@ class ZHPJ(BaseGenerator):
 
     def map_data(self, x, *args):
         pass
+
+
+if __name__ == '__main__':
+    zdht = ZDHT(dates=['20180101', '20230517'])
+    stock_df = zdht.generate_raw_data(0.2, 0.1, 2, 1, 0.5)
+    stock_df = stock_df[['股票代码', '重大合同发布时间', 'score']]
+    stock_df.columns = ['stock_code', 'date', 'score']
+    stock_df['date'] = pd.to_datetime(stock_df['date'])
+    score = stock_df.set_index(['stock_code', 'date'])['score'].unstack([-2])
+    zdht.get_price()
+    df_ret = zdht.get_next_ret(stock_df)
+    df_ret_index, count_df = zdht.get_next_index(df_ret)
+    df_ret_index.to_csv('zdht_df_ret_index.csv')
+    count_df.to_csv('zdht_count_df.csv')
+
+    score_new = score.fillna(0)
+    for i in range(1, len(score_new)):
+        score_new.iloc[i] = score_new.iloc[i - 1] * 0.8 + score_new.iloc[i]
+    index_ret = get_price('000300.SH',
+                          zdht.dates[0],
+                          zdht.dates[1],
+                          '1d',
+                          ['close'],
+                          fq='pre').pct_change()
+    backtest(score_new, zdht.price_detail['close'].unstack([-2]), index_ret, 'zdht')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

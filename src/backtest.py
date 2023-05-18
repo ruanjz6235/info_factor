@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 
 def cal_annualized_return(asset_return, multiplier):
-    if not asset_return.empty:
+    if len(asset_return) > 1:
         annualized_return = multiplier * asset_return.mean()
         annualized_return = np.exp(annualized_return) - 1
     else:
@@ -14,7 +14,7 @@ def cal_annualized_return(asset_return, multiplier):
 
 
 def cal_annualized_excess_return(asset_return, index_return, multiplier):
-    if not asset_return.empty:
+    if len(asset_return) > 1:
         annualized_return = multiplier * (asset_return - index_return).mean()
         annualized_return = np.exp(annualized_return) - 1
     else:
@@ -28,10 +28,14 @@ def cal_beta(asset_return, index_return, multiplier, interest=0.03):
         y = asset_return - rf
         x = index_return - rf
         x = sm.add_constant(x)
+        z = pd.concat([x, y]).fillna(0)
+        x = z[z.columns[:2]]
+        y = z[z.columns[2]]
+        # print('y', y.tolist(), 'x', x['close'].tolist())
         model = sm.OLS(y, x).fit()
         if len(y) > 1:
-            beta = model.params[1]
-            alpha = model.params[0]
+            beta = model.params.values[1]
+            alpha = model.params.values[0]
             alpha = np.exp(multiplier * alpha) - 1
         else:
             beta = np.nan
@@ -43,7 +47,7 @@ def cal_beta(asset_return, index_return, multiplier, interest=0.03):
 
 
 def cal_sharpe_ratio(asset_return, multiplier, interest=0.03):
-    if not asset_return.empty:
+    if len(asset_return) > 1:
         annualized_return = multiplier * asset_return.mean()
         annualized_return = np.exp(annualized_return) - 1
         annualized_vol = asset_return.std(ddof=1) * np.sqrt(multiplier)
@@ -54,7 +58,7 @@ def cal_sharpe_ratio(asset_return, multiplier, interest=0.03):
 
 
 def cal_information_ratio(asset_return, index_return, multiplier):
-    if len(asset_return) > 0 and len(index_return) > 0:
+    if len(asset_return) > 1 and len(index_return) > 1:
         active_return = asset_return - index_return
         tracking_error = (active_return.std(ddof=1)) * np.sqrt(multiplier)
         asset_annualized_return = multiplier * asset_return.mean()
@@ -69,7 +73,7 @@ def cal_mdd(asset_return):
     """
     :param asset_return: 计算区间内的收益率序列
     """
-    if not asset_return.empty:
+    if len(asset_return) > 1:
         asset_return = np.log(asset_return + 1)
         asset_return.dropna(inplace=True)
         running_max = np.maximum.accumulate(asset_return.cumsum())
@@ -82,7 +86,7 @@ def cal_mdd(asset_return):
 
 
 def cal_excess_winning_rate(asset_return, index_return):
-    if not asset_return.empty:
+    if len(asset_return) > 1:
         return_diff = asset_return - index_return
         winning_rate = len(return_diff[return_diff > 0]) / len(return_diff)
     else:
@@ -91,7 +95,7 @@ def cal_excess_winning_rate(asset_return, index_return):
 
 
 def cal_winning_rate(asset_return):
-    if not asset_return.empty:
+    if len(asset_return) > 1:
         return_diff = asset_return
         winning_rate = len(return_diff[return_diff > 0]) / len(return_diff)
     else:
@@ -112,19 +116,19 @@ def backtest(score, ret, index_ret, name, k=0):
     def get_port_ts(score, i):
         cond = (score > i) & (score <= (i + 1))
         port = score.where(cond, 0).where(~cond, 1)
-        port = port / port.sum(axis=1)
-        return port
+        port = port.T / port.sum(axis=1)
+        return port.T
 
     def resample_data(port, m, k):
         dates = np.arange(len(port))
-        resample_dates = dates[[x % m == k for x in dates]]
+        resample_dates = dates[[x % m != k for x in dates]]
         port.iloc[resample_dates] = np.nan
         return port.ffill()
 
     def resample_ret(ret, window):
-        ret['ret'] = np.log(ret['ret'] + 1)
-        freq_ret = ret.resample(window)['ret'].sum()
-        freq_ret['ret'] = np.exp(freq_ret['ret']) - 1
+        ret = np.log(ret + 1)
+        freq_ret = ret.resample(window).sum()
+        freq_ret = np.exp(freq_ret) - 1
         return freq_ret
 
     def plot(series_lst, name):
@@ -167,4 +171,4 @@ def backtest(score, ret, index_ret, name, k=0):
     b = ['1', '3', '5', '10', '20']
     index = pd.MultiIndex.from_product([a, b], names=['score', 'period'])
     ret_risk_data = pd.DataFrame(ret_risk_data, columns=col, index=index)
-    ret_risk_data.to_csv(f'{name}.csv')
+    ret_risk_data.to_csv(f'{name}_backtest.csv')
