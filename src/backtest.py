@@ -28,7 +28,7 @@ def cal_beta(asset_return, index_return, multiplier, interest=0.03):
         y = asset_return - rf
         x = index_return - rf
         x = sm.add_constant(x)
-        z = pd.concat([x, y]).fillna(0)
+        z = pd.concat([x, y], axis=1).fillna(0)
         x = z[z.columns[:2]]
         y = z[z.columns[2]]
         # print('y', y.tolist(), 'x', x['close'].tolist())
@@ -109,64 +109,85 @@ def cal_wr_di_ret(asset_return):
     return wr / ret
 
 
+def cum(ret):
+    return np.exp(np.log(ret + 1).cumsum()) - 1
+
+
+def get_port_ts(score, i):
+    cond = (score > i) & (score <= (i + 1))
+    port = score.where(cond, 0).where(~cond, 1)
+    port = port.T / port.sum(axis=1)
+    return port.T
+
+
+def resample_data(port, m, k):
+    dates = np.arange(len(port))
+    resample_dates = dates[[x % m != k for x in dates]]
+    port.iloc[resample_dates] = np.nan
+    return port.ffill()
+
+
+def resample_ret(ret, window):
+    ret = np.log(ret + 1)
+    freq_ret = ret.resample(window).sum()
+    freq_ret = np.exp(freq_ret) - 1
+    return freq_ret
+
+
+def plot(series_lst, name):
+    plt.figure(figsize=(15, 8))
+    plt.rcParams["font.family"] = 'Songti SC'
+    for series in series_lst:
+        plt.plot(series)
+    plt.title(name)
+    plt.savefig(f'{name}.png')
+
+
+def ret_risk(asset_ret, index_ret):
+    """"""
+    # print('asset_ret, index_ret')
+    # print(asset_ret, index_ret)
+    annual_ret = cal_annualized_return(asset_ret, 252)
+    annual_excess_ret = cal_annualized_return(asset_ret - index_ret, 252)
+    beta, alpha = cal_beta(asset_ret, index_ret, 252)
+    sharpe = cal_sharpe_ratio(asset_ret, 252)
+    ir = cal_information_ratio(asset_ret, index_ret, 252)
+    mdd = cal_mdd(asset_ret)
+    freq_ret = []
+    for window in ['D', 'W', 'M', 'Y']:
+        asset_freq = resample_ret(asset_ret, window)
+        index_freq = resample_ret(index_ret, window)
+        wr_ret_asset = cal_wr_di_ret(asset_freq)
+        wr_ret_exces = cal_wr_di_ret(asset_freq - index_freq)
+        freq_ret.extend([wr_ret_asset, wr_ret_exces])
+    # print('[annual_ret, annual_excess_ret, beta, alpha, sharpe, ir, mdd] + freq_ret')
+    # print([annual_ret, annual_excess_ret, beta, alpha, sharpe, ir, mdd] + freq_ret)
+    return [annual_ret, annual_excess_ret, beta, alpha, sharpe, ir, mdd] + freq_ret
+
+
 def backtest(score, ret, index_ret, name, k=0):
-    def cum(ret):
-        return np.exp(np.log(ret + 1).cumsum()) - 1
-
-    def get_port_ts(score, i):
-        cond = (score > i) & (score <= (i + 1))
-        port = score.where(cond, 0).where(~cond, 1)
-        port = port.T / port.sum(axis=1)
-        return port.T
-
-    def resample_data(port, m, k):
-        dates = np.arange(len(port))
-        resample_dates = dates[[x % m != k for x in dates]]
-        port.iloc[resample_dates] = np.nan
-        return port.ffill()
-
-    def resample_ret(ret, window):
-        ret = np.log(ret + 1)
-        freq_ret = ret.resample(window).sum()
-        freq_ret = np.exp(freq_ret) - 1
-        return freq_ret
-
-    def plot(series_lst, name):
-        plt.figure(figsize=(15, 8))
-        plt.rcParams["font.family"] = 'Songti SC'
-        for series in series_lst:
-            plt.plot(series)
-        plt.title(name)
-        plt.savefig(f'{name}.png')
-
-    def ret_risk(asset_ret, index_ret):
-        """"""
-        annual_ret = cal_annualized_return(asset_ret, 252)
-        annual_excess_ret = cal_annualized_return(asset_ret - index_ret, 252)
-        beta, alpha = cal_beta(asset_ret, index_ret, 252)
-        sharpe = cal_sharpe_ratio(asset_ret, 252)
-        ir = cal_information_ratio(asset_ret, index_ret, 252)
-        mdd = cal_mdd(asset_ret)
-        freq_ret = []
-        for window in ['D', 'W', 'M', 'Y']:
-            asset_freq = resample_ret(asset_ret, window)
-            index_freq = resample_ret(index_ret, window)
-            wr_ret_asset = cal_wr_di_ret(asset_freq)
-            wr_ret_exces = cal_wr_di_ret(asset_freq - index_freq)
-            freq_ret.extend([wr_ret_asset, wr_ret_exces])
-        return [annual_ret, annual_excess_ret, beta, alpha, sharpe, ir, mdd] + freq_ret
-
     ret_risk_data = []
     for i in range(5):  # 0-1, 1-2, 2-3, 3-4, 4-5
         for m in [1, 3, 5, 10, 20]:  # 一日、三日、五日、十日、二十日持仓
             port_ts = resample_data(get_port_ts(score, i), m, k)
-            asset_ret = (port_ts * ret).sum(axis=1)
+            # print('port_ts, ret', port_ts, ret, port_ts.sum(axis=1))
+            # port_ts.to_csv('a.csv')
+            # print(port_ts.iloc[1].values)
+            # print(port_ts.columns)
+            # ret1 = ret[port_ts.columns[:-1]]
+            # print(ret1.iloc[1].values)
+            # print(ret1.iloc[1].values[port_ts.iloc[1].values[:-1] == 0.25])
+            asset_ret = (port_ts.shift(1) * ret).sum(axis=1)
+            # print('port_ts, asset_ret')
+            # print(port_ts.T.sort_values('2018-01-02').T, asset_ret.iloc[:50])
             asset_cum, index_cum = cum(asset_ret), cum(index_ret)
-            plot([asset_cum, index_cum], name)
-            ret_risk_data.append(ret_risk(asset_ret, index_ret))
-    col = ['年化收益率', '超额年化收益', '夏普比率', '最大回撤', 'Alpha', 'Beta', '信息比率', '年胜率/年平均涨幅',
-           '年超额胜率/年平均超额涨幅', '月胜率/月平均涨幅', '月超额胜率/月平均超跌涨幅', '周胜率/周平均涨幅',
-           '周超额胜率/周平均超跌涨幅', '日胜率/日平均涨幅', '日超额胜率/日平均超跌涨幅']
+            # print('asset_cum, index_cum', asset_cum, index_cum)
+            plot([asset_cum, index_cum], name + '-' + str(i) + '-' + str(m))
+            print(i, m)
+            ret_risk_data.append(ret_risk(np.log(asset_ret+1), np.log(index_ret+1)))
+    col = ['年化收益率', '超额年化收益', '夏普比率', '最大回撤', 'Alpha', 'Beta', '信息比率',
+           '日胜率/日平均涨幅', '日超额胜率/日平均超跌涨幅', '周胜率/周平均涨幅', '周超额胜率/周平均超跌涨幅',
+           '月胜率/月平均涨幅', '月超额胜率/月平均超跌涨幅', '年胜率/年平均涨幅', '年超额胜率/年平均超额涨幅']
     a = ['0_1', '1_2', '2_3', '3_4', '4_5']
     b = ['1', '3', '5', '10', '20']
     index = pd.MultiIndex.from_product([a, b], names=['score', 'period'])
