@@ -82,7 +82,7 @@ class BaseGenerator:
         import datetime
         if len(stock_df) > 0:
             cols1 = stock_df.columns[np.array([type(x) for x in stock_df.iloc[0].values]) == datetime.date]
-            cols2_cond1 = np.array(type(x) for x in stock_df.iloc[0].values) == str
+            cols2_cond1 = np.array([type(x) for x in stock_df.iloc[0].values]) == str
             cols2_cond2 = pd.DataFrame(
                 [stock_df.columns.str.contains(x) for x in ['date', 'day', 'Date', 'Day', '日期', '日']]
             ).any().values
@@ -625,17 +625,25 @@ class GFHG(BaseGenerator):
             df_new = df.set_index(['stock_code', 'date'])
             codes_date = df.groupby(['stock_code', 'date'])['step'].count()
             codes_date = codes_date[codes_date > 1].index
-            df1 = df_new[df_new.index.isin(codes_date)]
+            df1 = df_new[df_new.index.isin(codes_date)].reset_index()
             df2 = df_new[~df_new.index.isin(codes_date)]
-            df1['count'] = df1['step'].apply(lambda x: col_dict2[x])
-            df1 = df1.reset_index()
-            df1 = df1.groupby(['stock_code', 'date']).apply(
+            df10 = df1[(df1['step'] == '回购完成') & (df1['f002v_stk301'] == '回购完成')]
+            df11_code = list(set(df1['stock_code']) - set(df10['stock_code']))
+            df11 = df1[df1['stock_code'].isin(df11_code)]
+            df11['count'] = df11['step'].apply(lambda x: col_dict2[x])
+            df11 = df11.groupby(['stock_code', 'date']).apply(
                 lambda x: x[x['count'] == max(x['count'])]).reset_index(drop=True)
-            del df1['count']
-            return pd.concat([df1, df2.reset_index()])
+            del df11['count']
+            print(df1[df1['stock_code'] == '603801.SH'].sort_values(['date']))
+            df_new = pd.concat([df10, df11, df2.reset_index()])
+            df_new = df_new.set_index(['stock_code', 'date'])
+            codes_date = df.groupby(['stock_code', 'date'])['step'].count()
+            codes_date = codes_date[codes_date == 1].index
+            return df_new[df_new.index.isin(codes_date)].reset_index()
 
         stock_df_new = get_last_action(stock_df_new)
         stock_df_new = stock_df_new.merge(self.price_detail, on=['stock_code', 'date'], how='left')
+        print(stock_df_new[stock_df_new['stock_code'] == '603801.SH'].sort_values(['date']))
         return stock_df_new
 
     def map_data(self, x, *args):
@@ -682,6 +690,7 @@ class GFHG(BaseGenerator):
         stock_df = self.generate_raw_data([1.5, 1, 2, 1, 0.1],
                                           [3, 1, 2, 1.5, 1],
                                           [1, 0.1, 0.5, -0.2, -0.5, 0])
+        print(stock_df[stock_df['stock_code'] == '600337.SH'].sort_values(['date']))
         stock_df = stock_df[['stock_code', 'date', 'score']]
         self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
         df_ret = self.get_stock_next_ret(stock_df)
@@ -723,22 +732,23 @@ class JCJH(BaseGenerator):
         stock_df_new.loc[(stock_df_new['增减持计划进度'] == '停止实施')
                          & (stock_df_new['step'] == '减持完成'), 'step'] = '停止实施'
         stock_df_new.columns = ['stock_code', 'type', 'stage', 'ratio', 'step', 'date']
-        return stock_df_new
+        stock_df_new = stock_df_new.groupby(['stock_code', 'date', 'type', 'stage', 'step'])['ratio'].sum().reset_index()
+        return stock_df_new[['stock_code', 'type', 'stage', 'ratio', 'step', 'date']]
 
     def map_data(self, x, *args):
 
-        if x[3] == '减持计划':
+        if x[4] == '减持计划':
             ggjd = 1
-        elif x[3] == '减持实施':
+        elif x[4] == '减持实施':
             ggjd = 0.1
-        elif x[3] == '减持完成':
+        elif x[4] == '减持完成':
             ggjd = -0.2
-        elif x[3] == '停止实施':
+        elif x[4] == '停止实施':
             ggjd = -0.5
         else:
             ggjd = 0
 
-        type_list = x[4].split(',')
+        type_list = x[1].split(',')
 
         if '实际控制人' in type_list:
             gdlb = -2
@@ -749,9 +759,9 @@ class JCJH(BaseGenerator):
         else:
             gdlb = -0.5
 
-        if x[5] > 1:
+        if x[3] > 1:
             hgzj = -2
-        elif (x[5] >= 0.5) & (x[5] <= 1):
+        elif (x[3] >= 0.5) & (x[3] <= 1):
             hgzj = -1
         else:
             hgzj = -0.5
@@ -761,6 +771,7 @@ class JCJH(BaseGenerator):
     def __call__(self, *args, **kwargs):
         stock_df = self.generate_raw_data()
         stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
         self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
         df_ret = self.get_stock_next_ret(stock_df)
         df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
@@ -801,22 +812,23 @@ class ZCJH(BaseGenerator):
         stock_df_new.loc[(stock_df_new['增减持计划进度'] == '停止实施')
                          & (stock_df_new['step'] == '增持完成'), 'step'] = '停止实施'
         stock_df_new.columns = ['stock_code', 'type', 'stage', 'ratio', 'step', 'date']
-        return stock_df_new
+        stock_df_new = stock_df_new.groupby(['stock_code', 'date', 'type', 'stage', 'step'])['ratio'].sum().reset_index()
+        return stock_df_new[['stock_code', 'type', 'stage', 'ratio', 'step', 'date']]
 
     def map_data(self, x, *args):
 
-        if x[3] == '增持计划':
+        if x[4] == '增持计划':
             ggjd = 1
-        elif x[3] == '增持实施':
+        elif x[4] == '增持实施':
             ggjd = 0.1
-        elif x[3] == '增持完成':
+        elif x[4] == '增持完成':
             ggjd = -0.2
-        elif x[3] == '停止实施':
+        elif x[4] == '停止实施':
             ggjd = -0.5
         else:
             ggjd = 0
 
-        type_list = x[4].split(',')
+        type_list = x[1].split(',')
 
         if '实际控制人' in type_list:
             gdlb = -2
@@ -827,14 +839,23 @@ class ZCJH(BaseGenerator):
         else:
             gdlb = -0.5
 
-        if x[5] > 1:
+        if x[3] > 1:
             hgzj = -2
-        elif (x[5] >= 0.5) & (x[5] <= 1):
+        elif (x[3] >= 0.5) & (x[3] <= 1):
             hgzj = -1
         else:
             hgzj = -0.5
 
         return round(ggjd * (gdlb + hgzj) / 2, 2)
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %%限售解禁
@@ -852,26 +873,37 @@ class XSJJ(BaseGenerator):
     def cal_raw_data(self, stock_df, **kwargs):
         stock_df = stock_df[self.col]
         stock_df.columns = ['stock_code', 'date', 'cost', 'ratio']
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        stock_df = stock_df.merge(self.price_detail, on=['stock_code', 'date'], how='left')
         return stock_df
 
     def map_data(self, x, *args):
-        x01, x02, y01, y02, y03 = args[0]
-        x11, x12, y11, y12, y13 = args[1]
+        # x01, x02, y01, y02, y03 = args[0]
+        # x11, x12, y11, y12, y13 = args[1]
 
-        if x[2] > 10:
+        if x[3] > 10:
             jjbl = -2
-        elif (x[2] >= 5) & (x[2] <= 10):
+        elif (x[3] >= 5) & (x[3] <= 10):
             jjbl = -1
         else:
             jjbl = -0.5
 
-        if x[9] / x[1] > 2:
+        if x[4] / x[2] > 2:
             jjcb = -2
-        elif (x[9] / x[1] >= 1) & (x[9] / x[1] <= 2):
+        elif (x[4] / x[2] >= 1) & (x[4] / x[2] <= 2):
             jjcb = -1
         else:
             jjcb = 0
         return round((jjbl + jjcb) / 2, 2)
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %%实际控制人变更
@@ -898,6 +930,16 @@ class SKRBG(BaseGenerator):
             score = 0.5
 
         return score * 0.5
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
+
 
 
 # %%分红派息
@@ -2048,4 +2090,26 @@ if __name__ == '__main__':
     gfhg = GFHG(dates=['2018-01-01', '2023-05-19'])
     df_ret_index, count_df, stock_df = gfhg()
     gfhg.backtest(stock_df)
+
+    jcjh = JCJH(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = jcjh()
+    jcjh.backtest(stock_df)
+
+    zcjh = ZCJH(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = zcjh()
+    zcjh.backtest(stock_df)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
