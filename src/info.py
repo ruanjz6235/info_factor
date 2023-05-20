@@ -4,7 +4,6 @@ import torch
 import re
 from DataAPI.openapi.open_api import OpenAPI
 from functools import reduce
-from backtest import backtest
 # from const import periods
 periods = [1, 3, 5, 10, 20]
 
@@ -205,10 +204,6 @@ class BaseGenerator:
                               ['close'],
                               fq='pre')['close'].pct_change().fillna(0)
         backtest(score_new, self.price_detail['close'].unstack([-2]).pct_change().fillna(0), index_ret, self.__class__.__name__)
-
-
-bg = BaseGenerator(sentence='', dates=['2018-01-01', '2023-05-19'])
-bg.get_price()
 
 
 # %%重大合同
@@ -612,29 +607,12 @@ class GFHG(BaseGenerator):
                     'f019d_stk301': '回购完成',
                     'f020d_stk301': '回购股份已注销',
                     'declaredate_stk301': '停止回购'}
-        cols = ['董事会预案', '股东大会未通过', '股东大会通过', '实施回购', '回购完成', '回购股份已注销', '停止回购']
-        col_dict2 = dict(zip(list(cols), range(len(cols))))
         stock_df_new = stock_df.set_index(self.col).stack().reset_index()
         stock_df_new.columns = self.col + ['step', 'date']
         stock_df_new['step'] = stock_df_new['step'].apply(lambda x: col_dict[x])
         stock_df_new = stock_df_new[stock_df_new['step'] != '股东提议']
         stock_df_new.loc[stock_df_new['f002v_stk301'] == '股东大会未通过', 'step'] = '股东大会未通过'
         stock_df_new = stock_df_new.rename(columns={'thscode': 'stock_code'})
-
-        def get_last_action(df):
-            df_new = df.set_index(['stock_code', 'date'])
-            codes_date = df.groupby(['stock_code', 'date'])['step'].count()
-            codes_date = codes_date[codes_date > 1].index
-            df1 = df_new[df_new.index.isin(codes_date)]
-            df2 = df_new[~df_new.index.isin(codes_date)]
-            df1['count'] = df1['step'].apply(lambda x: col_dict2[x])
-            df1 = df1.reset_index()
-            df1 = df1.groupby(['stock_code', 'date']).apply(
-                lambda x: x[x['count'] == max(x['count'])]).reset_index(drop=True)
-            del df1['count']
-            return pd.concat([df1, df2.reset_index()])
-
-        stock_df_new = get_last_action(stock_df_new)
         stock_df_new = stock_df_new.merge(self.price_detail, on=['stock_code', 'date'], how='left')
         return stock_df_new
 
@@ -649,29 +627,29 @@ class GFHG(BaseGenerator):
         x11, x12, y11, y12, y13 = args[1]
         y21, y22, y23, y24, y25, y26 = args[2]
 
-        if x[2] / x[7] > x01:
+        if x[1] / x[6] > x01:
             hgjg = y01
-        elif (x[2] / x[7] >= x02) & (x[2] / x[7] <= x01):
+        elif (x[1] / x[6] >= x02) & (x[1] / x[6] <= x01):
             hgjg = y02
         else:
             hgjg = y03
 
-        if x[3] > x11:
+        if x[2] > x11:
             hgzj = y11
-        elif (x[3] >= x12) & (x[3] <= x11):
+        elif (x[2] >= x12) & (x[2] <= x11):
             hgzj = y12
         else:
             hgzj = y13
 
-        if x[5] == '董事会预案':
+        if x[4] == '董事会预案':
             fx = y21
-        elif x[5] == '股东大会通过':
+        elif x[4] == '股东大会通过':
             fx = y22
-        elif x[5] == '实施回购':
+        elif x[4] == '实施回购':
             fx = y23
-        elif x[5] == '股东大会未通过':
+        elif x[4] == '股东大会未通过':
             fx = y24
-        elif x[5] == '停止回购':
+        elif x[4] == '停止回购':
             fx = y25
         else:
             fx = y26
@@ -757,14 +735,6 @@ class JCJH(BaseGenerator):
             hgzj = -0.5
 
         return round(ggjd * (gdlb + hgzj) / 2, 2)
-
-    def __call__(self, *args, **kwargs):
-        stock_df = self.generate_raw_data()
-        stock_df = stock_df[['stock_code', 'date', 'score']]
-        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
-        df_ret = self.get_stock_next_ret(stock_df)
-        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
-        return df_ret_index, count_df, stock_df
 
 
 # %%增持計劃
@@ -2011,41 +1981,3 @@ class ZHPJ(BaseGenerator):
 
     def map_data(self, x, *args):
         pass
-
-
-if __name__ == '__main__':
-    zdht = ZDHT(dates=['20180101', '20230517'])
-    df_ret_index, count_df, stock_df = zdht()
-    zdht.backtest(stock_df)
-    # stock_df = zdht.generate_raw_data(0.2, 0.1, 2, 1, 0.5)
-    # stock_df = stock_df[['股票代码', '重大合同发布时间', 'score']]
-    # stock_df.columns = ['stock_code', 'date', 'score']
-    # stock_df['date'] = pd.to_datetime(stock_df['date'])
-    # zdht.get_price()
-    # df_ret = zdht.get_stock_next_ret(stock_df)
-    # df_ret_index, count_df = zdht.get_next_index(df_ret, name='zdht')
-    #
-    # score = stock_df.set_index(['stock_code', 'date'])['score'].unstack([-2])
-    # score_new = score.fillna(0)
-    # for i in range(1, len(score_new)):
-    #     score_new.iloc[i] = score_new.iloc[i - 1] * 0.8 + score_new.iloc[i]
-    # index_ret = get_price('000300.SH',
-    #                       zdht.dates[0],
-    #                       zdht.dates[1],
-    #                       '1d',
-    #                       ['close'],
-    #                       fq='pre').pct_change()
-    # backtest(score_new, zdht.price_detail['close'].unstack([-2]), index_ret, 'zdht')
-
-    dxzf = DXZF(dates=['2018-01-01', '2023-05-19'])
-    df_ret_index, count_df, stock_df = dxzf()
-    dxzf.backtest(stock_df)
-
-    gqjl = GQJL(dates=['2018-01-01', '2023-05-19'])
-    df_ret_index, count_df, stock_df = gqjl()
-    gqjl.backtest(stock_df)
-
-    gfhg = GFHG(dates=['2018-01-01', '2023-05-19'])
-    df_ret_index, count_df, stock_df = gfhg()
-    gfhg.backtest(stock_df)
-
