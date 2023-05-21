@@ -73,24 +73,28 @@ class BaseGenerator:
                 lambda x: x.shift(-period) / x - 1)
         return self.price_detail
 
-    @property
-    def stock_df(self):
-        if self.wencai_data:
-            stock_df = query_iwencai(self.sentence)
-        else:
-            stock_df = getattr(self.api, self.sentence)(*self.dates)
+    def normalize_date(self, stock_df):
         import datetime
         if len(stock_df) > 0:
             cols1 = stock_df.columns[np.array([type(x) for x in stock_df.iloc[0].values]) == datetime.date]
             cols2_cond1 = np.array([type(x) for x in stock_df.iloc[0].values]) == str
             cols2_cond2 = pd.DataFrame(
-                [stock_df.columns.str.contains(x) for x in ['date', 'day', 'Date', 'Day', '日期', '日']]
+                [stock_df.columns.str.contains(x) for x in ['date', 'day', 'Date', 'Day', '日期', '日', '时间']]
             ).any().values
             cols2 = stock_df.columns[cols2_cond1 & cols2_cond2]
             cols = np.append(cols1, cols2)
             if len(cols) > 0:
                 for col in cols:
                     stock_df[col] = pd.to_datetime(stock_df[col])
+        return stock_df
+
+    @property
+    def stock_df(self):
+        if self.wencai_data:
+            stock_df = query_iwencai(self.sentence)
+        else:
+            stock_df = getattr(self.api, self.sentence)(*self.dates)
+        stock_df = self.normalize_date(stock_df)
         return stock_df
 
     @stock_df.setter
@@ -941,7 +945,6 @@ class SKRBG(BaseGenerator):
         return df_ret_index, count_df, stock_df
 
 
-
 # %%分红派息
 # finished
 class FHPX(BaseGenerator):
@@ -996,7 +999,6 @@ class FHPX(BaseGenerator):
         stock_df[['f012n_stk441', 'f010nf011n_stk441']] = stock_df[['f012n_stk441', 'f010nf011n_stk441']].fillna(0)
         stock_df['fhl'] = round(stock_df['f012n_stk441'] / stock_df['f010_jgs060'] / 10, 3)
         stock_df['szl'] = round(stock_df['f010nf011n_stk441'] / 10, 3)
-        stock_df = stock_df.fillna('None')
 
         stack_col = ['f047d_stk441', 'f002d_stk441', 'f004d_stk441', 'f006d_stk441']
         steps = ['预披露', '董事会预案', '股东大会预案', '实施方案']
@@ -1013,48 +1015,57 @@ class FHPX(BaseGenerator):
                             | ((stock_df['f036v_stk441'] == steps[1]) & (stock_df['step'].isin(steps[:2])))
                             | ((stock_df['f036v_stk441'] == steps[2]) & (stock_df['step'].isin(steps[:3])))
                             | ((stock_df['f036v_stk441'] == steps[3]) & (stock_df['step'].isin(steps[:4])))
-                            | ((stock_df['f036v_stk441'] == '取消分红') & (
-                stock_df['date'] <= stock_df['f037d_stk441']))]
-        return stock_df
+                            | ((stock_df['f036v_stk441'] == '取消分红') & (stock_df['date'] <= stock_df['f037d_stk441']))]
+        return stock_df.rename(columns={'thscode': 'stock_code'})
 
     def map_data(self, x, *args):
         fhjd = 0
         fhbl = 0
         szbl = 0
 
-        if x[2] == '预披露':
+        if x[5] == '预披露':
             fhjd = 1
-        elif x[2] == '董事会预案':
+        elif x[5] == '董事会预案':
             fhjd = 0.1
-        elif x[2] == '股东大会预案':
+        elif x[5] == '股东大会预案':
             fhjd = 0.1
-        elif x[2] == '实施方案':
+        elif x[5] == '实施方案':
             fhjd = 0.2
         else:
             fhjd = 0
 
-        if x[3] > 0.02:
+        if x[1] > 0.02:
             fhbl = 1.5
-        elif (x[3] <= 0.02) & (x[3] >= 0.005):
+        elif (x[1] <= 0.02) & (x[1] >= 0.005):
             fhbl = 0.5
-        elif (x[3] < 0.005) & (x[3] > 0):
+        elif (x[1] < 0.005) & (x[1] > 0):
             fhbl = 0.1
         else:
             fhbl = 0
 
-        if x[4] > 1:
+        if x[2] > 1:
             szbl = 2
-        elif (x[4] <= 1) & (x[4] >= 0.5):
+        elif (x[2] <= 1) & (x[2] >= 0.5):
             szbl = 0.5
-        elif (x[4] < 0.5) & (x[4] > 0):
+        elif (x[2] < 0.5) & (x[2] > 0):
             szbl = 0.1
         else:
             szbl = 0
 
         return round(fhjd * max(fhbl, szbl), 2)
 
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
+
 
 # %% 业绩预告 && 业绩快报 && 业绩报告
+# unfinished
 class YJBG(BaseGenerator):
     def __init__(self, dates):
         """
@@ -1133,9 +1144,9 @@ class YJBG(BaseGenerator):
             '''
         :param dates:
         """
-        super(YJBG, self).__init__(sentence='get_yjbg', dates=dates)
+        super(YJBG, self).__init__(sentence='get_yjbg_factor', dates=dates)
         self.wencai_data = False
-        self.col = ['thscode', 'fhl', 'szl', 'f036v_stk441', 'f037d_stk441']
+        self.col = ['thscode', 'declaredate_stk428', 'score']
 
     def cal_raw_data(self, stock_df, **kwargs):
         stock_df['declaredate_stk428'] = stock_df['declaredate_stk428'].astype(str)
@@ -1229,8 +1240,18 @@ class YJBG(BaseGenerator):
           ) a
         """
 
+    def __call__(self, *args, **kwargs):
+        stock_df = self.stock_df[self.col]
+        stock_df.columns = ['stock_code', 'date', 'score']
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
+
 
 # %% 股份冻结 & 股份质押
+# unfinished
 class DJZY(BaseGenerator):
     def __init__(self, dates):
         """
@@ -1314,6 +1335,15 @@ class DJZY(BaseGenerator):
     def map_data(self, x, *args):
         pass
 
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
+
 
 # %% 监管函
 class JGH(BaseGenerator):
@@ -1325,14 +1355,25 @@ class JGH(BaseGenerator):
         super(JGH, self).__init__(sentence='{start_date}至今监管函', dates=dates)
         self.wencai_data = True
         self.col = ['股票代码', '监管日期']
+        self.map_tp = 'series'
 
     def cal_raw_data(self, stock_df, **kwargs):
         stock_df = stock_df[self.col].drop_duplicates()
         stock_df['score'] = -1.5
+        stock_df.columns = ['stock_code', 'date', 'score']
         return stock_df
 
     def map_data(self, x, *args):
-        pass
+        return x
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 立案调查
@@ -1345,9 +1386,12 @@ class LADC(BaseGenerator):
         super(LADC, self).__init__(sentence='{start_date}至今立案调查内容，立案调查对象', dates=dates)
         self.wencai_data = True
         self.col = ['股票代码', '立案调查时间', '立案调查对象']
+        self.map_tp = 'series'
 
     def cal_raw_data(self, stock_df, **kwargs):
-        return stock_df.groupby(self.col[:2])['立案调查对象'].agg(''.join).reset_index()
+        stock_df = stock_df.groupby(self.col[:2])['立案调查对象'].agg(''.join).reset_index()
+        stock_df.columns = ['stock_code', 'date', 'score']
+        return stock_df
 
     def map_data(self, x, *args):
 
@@ -1365,6 +1409,15 @@ class LADC(BaseGenerator):
             tmp_r = -0.5
 
         return tmp_r
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 年报非标
@@ -1389,13 +1442,26 @@ class NBFB(BaseGenerator):
         """
         super(NBFB, self).__init__(sentence='get_nbfb', dates=dates)
         self.wencai_data = False
-        self.col = ['thscode', 'declaredate', 'f003', 'nbfb_score']
+        self.col = ['thscode', 'declaredate', 'nbfb_score']
+        self.map_tp = 'series'
 
     def cal_raw_data(self, stock_df, **kwargs):
-        return stock_df[stock_df['declaredate'].notnull()]
+        stock_df = stock_df[self.col]
+        stock_df = stock_df[stock_df['declaredate'].notnull()]
+        stock_df.columns = ['stock_code', 'date', 'score']
+        return stock_df
 
     def map_data(self, x, *args):
-        pass
+        return x
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 披星戴帽
@@ -1435,15 +1501,28 @@ class PXDM(BaseGenerator):
         '''
         :param dates:
         """
-        super(PXDM, self).__init__(sentence='get_djzy', dates=dates)
+        super(PXDM, self).__init__(sentence='get_pxdm', dates=dates)
         self.wencai_data = False
-        self.col = ['thscode', 'declaredate_stk019', 'f005n_stk019', 'nbfb_score']
+        self.col = ['thscode', 'declaredate_stk019', 'pxdm_score']
+        self.map_tp = 'series'
 
     def cal_raw_data(self, stock_df, **kwargs):
-        return stock_df[stock_df['declaredate_stk019'].notnull()]
+        stock_df = stock_df[stock_df['declaredate_stk019'].notnull()]
+        stock_df = stock_df[self.col]
+        stock_df.columns = ['stock_code', 'date', 'score']
+        return stock_df
 
     def map_data(self, x, *args):
-        pass
+        return x
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 诉讼仲裁
@@ -1608,25 +1687,35 @@ class SSZC(BaseGenerator):
         '''
         :param dates:
         """
-        super(SSZC, self).__init__(sentence='get_sszc', dates=dates)
+        super(SSZC, self).__init__(sentence='get_sszc_factor', dates=dates)
         self.wencai_data = False
         self.col = ['thscode', 'date', 'score']
+        self.map_tp = 'series'
 
     def cal_raw_data(self, stock_df, **kwargs):
         sszc_first = stock_df[['thscode', 'first_d', 'first_score']]
-        sszc_first.columns = ['thscode', 'date', 'score']
+        sszc_first.columns = ['stock_code', 'date', 'score']
 
         sszc_second = stock_df[['thscode', 'second_d', 'second_score']]
-        sszc_second.columns = ['thscode', 'date', 'score']
+        sszc_second.columns = ['stock_code', 'date', 'score']
 
         sszc_end = stock_df[['thscode', 'end_d', 'end_score']]
-        sszc_end.columns = ['thscode', 'date', 'score']
+        sszc_end.columns = ['stock_code', 'date', 'score']
 
         stock_df = pd.concat([sszc_first, sszc_second, sszc_end], axis=0).dropna()
         return stock_df[stock_df['date'].notnull()]
 
     def map_data(self, x, *args):
-        pass
+        return x
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.normalize_date(self.generate_raw_data())
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 违规处罚
@@ -1687,12 +1776,25 @@ class WGCF(BaseGenerator):
         super(WGCF, self).__init__(sentence='get_wgcf', dates=dates)
         self.wencai_data = False
         self.col = ['thscode', 'discdate_stk656', 'score']
+        self.map_tp = 'series'
 
-    def cal_raw_data(self, stock_df, **kwargs):
-        return stock_df[stock_df['discdate_stk656'].notnull()]
+    def cal_raw_data(self, **kwargs):
+        stock_df = self.normalize_date(self.api.get_wgcf_factor(*self.dates))
+        stock_df = stock_df[stock_df['discdate_stk656'].notnull()]
+        stock_df.columns = ['stock_code', 'date', 'score']
+        return stock_df
 
     def map_data(self, x, *args):
-        pass
+        return x
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.cal_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 债务违约
@@ -1782,7 +1884,16 @@ class ZWWY(BaseGenerator):
         pass
 
     def map_data(self, x, *args):
-        pass
+        return x
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 并购重组
@@ -1872,7 +1983,16 @@ class BGCZ(BaseGenerator):
         pass
 
     def map_data(self, x, *args):
-        pass
+        return x
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 研報評級
@@ -2099,14 +2219,45 @@ if __name__ == '__main__':
     df_ret_index, count_df, stock_df = zcjh()
     zcjh.backtest(stock_df)
 
+    xsjj = XSJJ(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = xsjj()
+    xsjj.backtest(stock_df)
 
+    skrbg = SKRBG(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = skrbg()
+    skrbg.backtest(stock_df)
 
+    fhpx = FHPX(dates=['2018-01-01', '2023-05-19'])
+    df_ret_index, count_df, stock_df = fhpx()
+    fhpx.backtest(stock_df)
 
+    jgh = JGH(dates=['2018-01-01', '2023-05-19'])
+    df_ret_index, count_df, stock_df = jgh()
+    jgh.backtest(stock_df)
 
+    ladc = LADC(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = ladc()
+    ladc.backtest(stock_df)
 
+    nbfb = NBFB(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = nbfb()
+    nbfb.backtest(stock_df)
 
+    pxdm = PXDM(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = pxdm()
+    pxdm.backtest(stock_df)
 
+    wgcf = WGCF(dates=['2018-01-01', '2023-05-19', '2017-06-01'])
+    df_ret_index, count_df, stock_df = wgcf()
+    wgcf.backtest(stock_df)
 
+    sszc = SSZC(dates=['2018-01-01', '2023-05-19', '2017-06-01'])
+    df_ret_index, count_df, stock_df = sszc()
+    sszc.backtest(stock_df)
+
+    yjbg = YJBG(dates=['2018-01-01', '2023-05-19'])
+    df_ret_index, count_df, stock_df = yjbg()
+    yjbg.backtest(stock_df)
 
 
 
