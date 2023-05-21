@@ -1333,7 +1333,7 @@ class DJZY(BaseGenerator):
         pass
 
     def map_data(self, x, *args):
-        pass
+        return x
 
     def __call__(self, *args, **kwargs):
         stock_df = self.generate_raw_data()

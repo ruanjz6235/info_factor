@@ -1060,6 +1060,7 @@ class FHPX(BaseGenerator):
 
 
 # %% 业绩预告 && 业绩快报 && 业绩报告
+# unfinished
 class YJBG(BaseGenerator):
     def __init__(self, dates):
         """
@@ -1245,6 +1246,7 @@ class YJBG(BaseGenerator):
 
 
 # %% 股份冻结 & 股份质押
+# unfinished
 class DJZY(BaseGenerator):
     def __init__(self, dates):
         """
@@ -1327,6 +1329,15 @@ class DJZY(BaseGenerator):
 
     def map_data(self, x, *args):
         pass
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 监管函
@@ -1695,9 +1706,7 @@ class SSZC(BaseGenerator):
     def __call__(self, *args, **kwargs):
         stock_df = self.normalize_date(self.generate_raw_data())
         stock_df = stock_df[['stock_code', 'date', 'score']]
-        print(stock_df[(stock_df['stock_code'] == '300370.SZ') & (stock_df['date'] == '2020-09-08')])
         stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
-        print(stock_df[(stock_df['stock_code'] == '300370.SZ') & (stock_df['date'] == '2020-09-08')])
         self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
         df_ret = self.get_stock_next_ret(stock_df)
         df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
@@ -1870,7 +1879,16 @@ class ZWWY(BaseGenerator):
         pass
 
     def map_data(self, x, *args):
-        pass
+        return x
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 并购重组
@@ -1960,7 +1978,16 @@ class BGCZ(BaseGenerator):
         pass
 
     def map_data(self, x, *args):
-        pass
+        return x
+
+    def __call__(self, *args, **kwargs):
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %% 研報評級
@@ -2141,6 +2168,94 @@ class ZHPJ(BaseGenerator):
 
     def map_data(self, x, *args):
         pass
+
+
+if __name__ == '__main__':
+    zdht = ZDHT(dates=['20180101', '20230517'])
+    df_ret_index, count_df, stock_df = zdht()
+    zdht.backtest(stock_df)
+    # stock_df = zdht.generate_raw_data(0.2, 0.1, 2, 1, 0.5)
+    # stock_df = stock_df[['股票代码', '重大合同发布时间', 'score']]
+    # stock_df.columns = ['stock_code', 'date', 'score']
+    # stock_df['date'] = pd.to_datetime(stock_df['date'])
+    # zdht.get_price()
+    # df_ret = zdht.get_stock_next_ret(stock_df)
+    # df_ret_index, count_df = zdht.get_next_index(df_ret, name='zdht')
+    #
+    # score = stock_df.set_index(['stock_code', 'date'])['score'].unstack([-2])
+    # score_new = score.fillna(0)
+    # for i in range(1, len(score_new)):
+    #     score_new.iloc[i] = score_new.iloc[i - 1] * 0.8 + score_new.iloc[i]
+    # index_ret = get_price('000300.SH',
+    #                       zdht.dates[0],
+    #                       zdht.dates[1],
+    #                       '1d',
+    #                       ['close'],
+    #                       fq='pre').pct_change()
+    # backtest(score_new, zdht.price_detail['close'].unstack([-2]), index_ret, 'zdht')
+
+    dxzf = DXZF(dates=['2018-01-01', '2023-05-19'])
+    df_ret_index, count_df, stock_df = dxzf()
+    dxzf.backtest(stock_df)
+
+    gqjl = GQJL(dates=['2018-01-01', '2023-05-19'])
+    df_ret_index, count_df, stock_df = gqjl()
+    gqjl.backtest(stock_df)
+
+    gfhg = GFHG(dates=['2018-01-01', '2023-05-19'])
+    df_ret_index, count_df, stock_df = gfhg()
+    gfhg.backtest(stock_df)
+
+    jcjh = JCJH(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = jcjh()
+    jcjh.backtest(stock_df)
+
+    zcjh = ZCJH(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = zcjh()
+    zcjh.backtest(stock_df)
+
+    xsjj = XSJJ(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = xsjj()
+    xsjj.backtest(stock_df)
+
+    skrbg = SKRBG(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = skrbg()
+    skrbg.backtest(stock_df)
+
+    fhpx = FHPX(dates=['2018-01-01', '2023-05-19'])
+    df_ret_index, count_df, stock_df = fhpx()
+    fhpx.backtest(stock_df)
+
+    jgh = JGH(dates=['2018-01-01', '2023-05-19'])
+    df_ret_index, count_df, stock_df = jgh()
+    jgh.backtest(stock_df)
+
+    ladc = LADC(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = ladc()
+    ladc.backtest(stock_df)
+
+    nbfb = NBFB(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = nbfb()
+    nbfb.backtest(stock_df)
+
+    pxdm = PXDM(dates=['20180101', '20230519'])
+    df_ret_index, count_df, stock_df = pxdm()
+    pxdm.backtest(stock_df)
+
+    wgcf = WGCF(dates=['2018-01-01', '2023-05-19', '2017-06-01'])
+    df_ret_index, count_df, stock_df = wgcf()
+    wgcf.backtest(stock_df)
+
+    sszc = SSZC(dates=['2018-01-01', '2023-05-19', '2017-06-01'])
+    df_ret_index, count_df, stock_df = sszc()
+    sszc.backtest(stock_df)
+
+    yjbg = YJBG(dates=['2018-01-01', '2023-05-19'])
+    df_ret_index, count_df, stock_df = yjbg()
+    yjbg.backtest(stock_df)
+
+
+
 
 
 
