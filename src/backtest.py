@@ -195,3 +195,4 @@ def backtest(score, ret, index_ret, name, k=0):
     index = pd.MultiIndex.from_product([a, b], names=['score', 'period'])
     ret_risk_data = pd.DataFrame(ret_risk_data, columns=col, index=index)
     ret_risk_data.to_excel(f'./{name}/{name}_backtest.xlsx')
+
