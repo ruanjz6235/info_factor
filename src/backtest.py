@@ -137,7 +137,7 @@ def resample_ret(ret, window):
 def plot(series_lst, name):
     plt.figure(figsize=(15, 8))
     plt.rcParams["font.family"] = 'Songti SC'
-    for series_name, series in series_lst:
+    for series_name, series in series_lst.items():
         plt.plot(series, label=series_name)
     plt.title(name)
     plt.legend()
@@ -184,6 +184,7 @@ def backtest(score, ret, index_ret, name, k=0):
             # print('port_ts, asset_ret')
             # print(port_ts.T.sort_values('2018-01-02').T, asset_ret.iloc[:50])
             asset_cum.update({str(i) + '-' + str(m): cum(asset_ret)})
+            plot({str(i) + '-' + str(m): cum(asset_ret), 'index': cum(index_ret)}, name + str(i) + '-' + str(m))
             ret_risk_data.append(ret_risk(np.log(asset_ret+1), np.log(index_ret+1)))
     asset_cum.update({'index': cum(index_ret)})
     plot(asset_cum, name)
