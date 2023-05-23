@@ -140,7 +140,7 @@ def plot(series_lst, name):
     for series in series_lst:
         plt.plot(series)
     plt.title(name)
-    plt.savefig(f'{name}.png')
+    plt.savefig(f"./{name.split('-')[0]}/{name}.png")
 
 
 def ret_risk(asset_ret, index_ret):
@@ -167,7 +167,8 @@ def ret_risk(asset_ret, index_ret):
 
 def backtest(score, ret, index_ret, name, k=0):
     ret_risk_data = []
-    for i in range(5):  # 0-1, 1-2, 2-3, 3-4, 4-5
+    x, y = np.floor(score.min().min()), np.floor(score.max().max())
+    for i in range(int(x), int(y)+1):  # 0-1, 1-2, 2-3, 3-4, 4-5
         for m in [1, 3, 5, 10, 20]:  # 一日、三日、五日、十日、二十日持仓
             port_ts = resample_data(get_port_ts(score, i), m, k)
             # print('port_ts, ret', port_ts, ret, port_ts.sum(axis=1))
@@ -188,8 +189,8 @@ def backtest(score, ret, index_ret, name, k=0):
     col = ['年化收益率', '超额年化收益', '夏普比率', '最大回撤', 'Alpha', 'Beta', '信息比率',
            '日胜率/日平均涨幅', '日超额胜率/日平均超跌涨幅', '周胜率/周平均涨幅', '周超额胜率/周平均超跌涨幅',
            '月胜率/月平均涨幅', '月超额胜率/月平均超跌涨幅', '年胜率/年平均涨幅', '年超额胜率/年平均超额涨幅']
-    a = ['0_1', '1_2', '2_3', '3_4', '4_5']
+    a = [f'{i}_{i+1}' for i in range(int(x), int(y)+1)]
     b = ['1', '3', '5', '10', '20']
     index = pd.MultiIndex.from_product([a, b], names=['score', 'period'])
     ret_risk_data = pd.DataFrame(ret_risk_data, columns=col, index=index)
-    ret_risk_data.to_csv(f'{name}_backtest.csv')
+    ret_risk_data.to_excel(f'./{name}/{name}_backtest.xlsx')

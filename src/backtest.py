@@ -137,10 +137,11 @@ def resample_ret(ret, window):
 def plot(series_lst, name):
     plt.figure(figsize=(15, 8))
     plt.rcParams["font.family"] = 'Songti SC'
-    for series in series_lst:
-        plt.plot(series)
+    for series_name, series in series_lst:
+        plt.plot(series, label=series_name)
     plt.title(name)
-    plt.savefig(f'{name}.png')
+    plt.legend()
+    plt.savefig(f"./{name}/{name}.png")
 
 
 def ret_risk(asset_ret, index_ret):
@@ -167,7 +168,9 @@ def ret_risk(asset_ret, index_ret):
 
 def backtest(score, ret, index_ret, name, k=0):
     ret_risk_data = []
-    for i in range(5):  # 0-1, 1-2, 2-3, 3-4, 4-5
+    x, y = np.floor(score.min().min()), np.floor(score.max().max())
+    asset_cum = {}
+    for i in range(int(x), int(y)+1):  # 0-1, 1-2, 2-3, 3-4, 4-5
         for m in [1, 3, 5, 10, 20]:  # 一日、三日、五日、十日、二十日持仓
             port_ts = resample_data(get_port_ts(score, i), m, k)
             # print('port_ts, ret', port_ts, ret, port_ts.sum(axis=1))
@@ -180,16 +183,15 @@ def backtest(score, ret, index_ret, name, k=0):
             asset_ret = (port_ts.shift(1) * ret).sum(axis=1)
             # print('port_ts, asset_ret')
             # print(port_ts.T.sort_values('2018-01-02').T, asset_ret.iloc[:50])
-            asset_cum, index_cum = cum(asset_ret), cum(index_ret)
-            # print('asset_cum, index_cum', asset_cum, index_cum)
-            plot([asset_cum, index_cum], name + '-' + str(i) + '-' + str(m))
-            print(i, m)
+            asset_cum.update({str(i) + '-' + str(m): cum(asset_ret)})
             ret_risk_data.append(ret_risk(np.log(asset_ret+1), np.log(index_ret+1)))
+    asset_cum.update({'index': cum(index_ret)})
+    plot(asset_cum, name)
     col = ['年化收益率', '超额年化收益', '夏普比率', '最大回撤', 'Alpha', 'Beta', '信息比率',
            '日胜率/日平均涨幅', '日超额胜率/日平均超跌涨幅', '周胜率/周平均涨幅', '周超额胜率/周平均超跌涨幅',
            '月胜率/月平均涨幅', '月超额胜率/月平均超跌涨幅', '年胜率/年平均涨幅', '年超额胜率/年平均超额涨幅']
-    a = ['0_1', '1_2', '2_3', '3_4', '4_5']
+    a = [f'{i}_{i+1}' for i in range(int(x), int(y)+1)]
     b = ['1', '3', '5', '10', '20']
     index = pd.MultiIndex.from_product([a, b], names=['score', 'period'])
     ret_risk_data = pd.DataFrame(ret_risk_data, columns=col, index=index)
-    ret_risk_data.to_csv(f'{name}_backtest.csv')
+    ret_risk_data.to_excel(f'./{name}/{name}_backtest.xlsx')

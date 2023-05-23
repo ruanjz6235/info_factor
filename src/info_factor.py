@@ -49,7 +49,7 @@ class BaseGenerator:
                                      fq='pre')
             self.price_detail = pd.concat(price_detail)
             self.price_detail.index.names = ['stock_code', 'date']
-        self.tradeday = self.price_detail.index
+        self.tradeday = self.price_detail.index.levels[1]
 
     def get_nfq_prev_close(self, stock_list=None):
         if not stock_list:
@@ -135,9 +135,16 @@ class BaseGenerator:
             stock_df['score'] = stock_df.apply(self.map_data, axis=1, args=args)
         return stock_df
 
+    def complete_data(self, df, fillna=None):
+        df_nan = pd.DataFrame(index=self.tradeday.difference(df.index), columns=df.columns)
+        df = pd.concat([df, df_nan]).sort_index()
+        if fillna:
+            df = df.fillna(fillna)
+        return df
+
     def get_decay_score(self, stock_df):
         score = stock_df.set_index(['stock_code', 'date']).unstack([-2])
-        score_new = score.fillna(0)
+        score_new = self.complete_data(score, fillna=0)
         for ll in range(1, len(score_new)):
             score_new.iloc[ll] = score_new.iloc[ll - 1] * 0.8 + score_new.iloc[ll]
         return score_new.stack([-2]).reset_index()
@@ -193,13 +200,14 @@ class BaseGenerator:
 
         df_ret_index = df_ret.groupby(['score'])[df_ret.columns[3:]].apply(get_index).stack([-2]).reset_index()
         count_df = df_ret_index['score'].describe()
-        df_ret_index.to_csv(f'{name}_df_ret_index.csv')
-        count_df.to_csv(f'{name}_count_df.csv')
+        df_ret_index.to_excel(f'./{name}/{name}_df_ret_index.xlsx')
+        count_df.to_excel(f'./{name}/{name}_count_df.xlsx')
         return df_ret_index, count_df
 
     def backtest(self, stock_df):
+        stock_df = stock_df[(stock_df['date'] >= self.dates[0]) & (stock_df['date'] <= self.dates[1])]
         score = stock_df.drop_duplicates().set_index(['stock_code', 'date'])['score'].unstack([-2])
-        score_new = score.fillna(0)
+        score_new = self.complete_data(score, fillna=0)
         for i in range(1, len(score_new)):
             score_new.iloc[i] = score_new.iloc[i - 1] * 0.8 + score_new.iloc[i]
         index_ret = get_price('000300.SH',
@@ -210,9 +218,14 @@ class BaseGenerator:
                               fq='pre')['close'].pct_change().fillna(0)
         backtest(score_new, self.price_detail['close'].unstack([-2]).pct_change().fillna(0), index_ret, self.__class__.__name__)
 
-
-bg = BaseGenerator(sentence='', dates=['2018-01-01', '2023-05-19'])
-bg.get_price()
+    def __call__(self, *args, **kwargs):
+        self.get_price(stock_list=self.stock_df['stock_code'].drop_duplicates().tolist())
+        stock_df = self.generate_raw_data()
+        stock_df = stock_df[['stock_code', 'date', 'score']]
+        stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        df_ret = self.get_stock_next_ret(stock_df)
+        df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
+        return df_ret_index, count_df, stock_df
 
 
 # %%重大合同
@@ -241,7 +254,7 @@ class ZDHT(BaseGenerator):
         stock_df = stock_df.merge(total_income[['股票代码', 'last_year', '营业总收入']],
                                   how='left', on=['股票代码', 'last_year'])
         stock_df['score'] = round(stock_df['重大合同金额'] / stock_df['营业总收入'], 2)
-        return stock_df.copy()
+        return stock_df.rename(columns={'股票代码': 'stock_code', '重大合同发布时间': 'date'})
 
     def map_data(self, x, *args):
         """
@@ -261,10 +274,9 @@ class ZDHT(BaseGenerator):
 
     def __call__(self, *args, **kwargs):
         stock_df = self.generate_raw_data(0.2, 0.1, 2, 1, 0.5)
-        stock_df = stock_df[['股票代码', '重大合同发布时间', 'score']]
-        stock_df.columns = ['stock_code', 'date', 'score']
+        stock_df = stock_df[['stock_code', 'date', 'score']]
         stock_df['date'] = pd.to_datetime(stock_df['date'])
-        self.get_price(price_df=bg.price_detail, stock_detail=bg.stock_detail, stock_list=bg.stock_list)
+        self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
         df_ret = self.get_stock_next_ret(stock_df)
         df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
         return df_ret_index, count_df, stock_df
@@ -428,12 +440,12 @@ class DXZF(BaseGenerator):
         return round(fxpf * (zfje + zfdx + zfjg) / 3, 2)
 
     def __call__(self, *args, **kwargs):
+        self.get_price(stock_list=self.stock_df['thscode'].drop_duplicates().tolist())
         stock_df = self.generate_raw_data([0.08, 0.02, 2, 1, 0.5],
                                           [1, 2, 0],
                                           [0.8, 1.1, 1.5, -1, 0.5, 2, 0],
                                           [1, 0.1, -1, 0.2, 0.5])
         stock_df = stock_df[['stock_code', 'date', 'score']]
-        self.get_price(price_df=bg.price_detail, stock_detail=bg.stock_detail, stock_list=bg.stock_list)
         df_ret = self.get_stock_next_ret(stock_df)
         df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
         return df_ret_index, count_df, stock_df
@@ -539,8 +551,11 @@ class GQJL(BaseGenerator):
         stk313.get_price(stock_list=stk313.stock_df['thscode'].drop_duplicates().tolist())
         # stk313.get_price(price_df=bg.price_detail, stock_detail=bg.stock_detail, stock_list=bg.stock_list)
         stock_df2 = stk313.cal_raw_data(stk313.stock_df)
+        self.price_detail = pd.concat([gqjl_his.price_detail, stk313.price_detail]).reset_index().drop_duplicates()
         self.stock_df_new = stock_df1.merge(stock_df2, on=['stock_code', 'date'], how='left').merge(
-            bg.price_detail, on=['stock_code', 'date'], how='left')
+            self.price_detail, on=['stock_code', 'date'], how='left')
+        self.tradeday = gqjl_his.tradeday.append(stk313.tradeday).drop_duplicates()
+        self.stock_list = list(set(gqjl_his.stock_list + stk313.stock_list))
 
     def map_data(self, x, *args):
 
@@ -694,7 +709,6 @@ class GFHG(BaseGenerator):
         stock_df = self.generate_raw_data([1.5, 1, 2, 1, 0.1],
                                           [3, 1, 2, 1.5, 1],
                                           [1, 0.1, 0.5, -0.2, -0.5, 0])
-        print(stock_df[stock_df['stock_code'] == '600337.SH'].sort_values(['date']))
         stock_df = stock_df[['stock_code', 'date', 'score']]
         self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
         df_ret = self.get_stock_next_ret(stock_df)
@@ -1258,6 +1272,7 @@ class DJZY(BaseGenerator):
         query = '''
         select thscode
               ,mtime
+              , gap
               ,case when dj_rat>0.7 then -2*type_score
                     when (dj_rat>0.3) and (dj_rat<=0.7) then -0.5*type_score
                     when (dj_rat>0) and (dj_rat<=0.3) then 0*type_score
@@ -1326,11 +1341,17 @@ class DJZY(BaseGenerator):
         ) a'''
         :param dates:
         """
-        super(DJZY, self).__init__(sentence='get_djzy', dates=dates)
+        super(DJZY, self).__init__(sentence='get_djzy_factor', dates=dates)
         self.wencai_data = False
+        self.map_tp = 'series'
 
     def cal_raw_data(self, stock_df, **kwargs):
-        pass
+        stock_df = stock_df.sort_values(['thscode', 'mtime', 'gap'], ascending=False).groupby(
+            ['thscode', 'mtime']).apply(lambda x: x.iloc[0]).reset_index(drop=True)
+        stock_df['score'] = stock_df['dj_score'] + stock_df['zy_score']
+        stock_df = stock_df[['thscode', 'mtime', 'score']]
+        stock_df.columns = ['stock_code', 'date', 'score']
+        return stock_df
 
     def map_data(self, x, *args):
         return x
@@ -1703,13 +1724,13 @@ class SSZC(BaseGenerator):
         sszc_end.columns = ['stock_code', 'date', 'score']
 
         stock_df = pd.concat([sszc_first, sszc_second, sszc_end], axis=0).dropna()
-        return stock_df[stock_df['date'].notnull()]
+        return self.normalize_date(stock_df[stock_df['date'].notnull()])
 
     def map_data(self, x, *args):
         return x
 
     def __call__(self, *args, **kwargs):
-        stock_df = self.normalize_date(self.generate_raw_data())
+        stock_df = self.generate_raw_data()
         stock_df = stock_df[['stock_code', 'date', 'score']]
         stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
         self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
@@ -1773,13 +1794,13 @@ class WGCF(BaseGenerator):
         '''
         :param dates:
         """
-        super(WGCF, self).__init__(sentence='get_wgcf', dates=dates)
+        super(WGCF, self).__init__(sentence='get_wgcf_factor', dates=dates)
         self.wencai_data = False
         self.col = ['thscode', 'discdate_stk656', 'score']
         self.map_tp = 'series'
 
-    def cal_raw_data(self, **kwargs):
-        stock_df = self.normalize_date(self.api.get_wgcf_factor(*self.dates))
+    def cal_raw_data(self, stock_df, **kwargs):
+        # stock_df = self.normalize_date(self.api.get_wgcf_factor(*self.dates))
         stock_df = stock_df[stock_df['discdate_stk656'].notnull()]
         stock_df.columns = ['stock_code', 'date', 'score']
         return stock_df
@@ -1788,7 +1809,7 @@ class WGCF(BaseGenerator):
         return x
 
     def __call__(self, *args, **kwargs):
-        stock_df = self.cal_raw_data()
+        stock_df = self.generate_raw_data()
         stock_df = stock_df[['stock_code', 'date', 'score']]
         stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
         self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
@@ -2260,7 +2281,40 @@ if __name__ == '__main__':
     yjbg.backtest(stock_df)
 
 
-
-
-
+# ! tar -zvcf DXZF.tar DXZF/
+# ! tar -zvcf DJZY.tar DJZY/
+# ! tar -zvcf FHPX.tar FHPX/
+# ! tar -zvcf GFHG.tar GFHG/
+# ! tar -zvcf GQJL.tar GQJL/
+# ! tar -zvcf JCJH.tar JCJH/
+# ! tar -zvcf JGH.tar JGH/
+# ! tar -zvcf LADC.tar LADC/
+# ! tar -zvcf NBFB.tar NBFB/
+# ! tar -zvcf PXDM.tar PXDM/
+# ! tar -zvcf SKRBG.tar SKRBG/
+# ! tar -zvcf SSZC.tar SSZC/
+# ! tar -zvcf WGCF.tar WGCF/
+# ! tar -zvcf XSJJ.tar XSJJ/
+# ! tar -zvcf YJBG.tar YJBG/
+# ! tar -zvcf ZCJH.tar ZCJH/
+# ! tar -zvcf ZDHT.tar ZDHT/
+#
+#
+# ! mkdir DXZF
+# ! mkdir DJZY
+# ! mkdir FHPX
+# ! mkdir GFHG
+# ! mkdir GQJL
+# ! mkdir JCJH
+# ! mkdir JGH
+# ! mkdir LADC
+# ! mkdir NBFB
+# ! mkdir PXDM
+# ! mkdir SKRBG
+# ! mkdir SSZC
+# ! mkdir WGCF
+# ! mkdir XSJJ
+# ! mkdir YJBG
+# ! mkdir ZCJH
+# ! mkdir ZDHT
 
