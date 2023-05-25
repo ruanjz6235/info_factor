@@ -382,8 +382,6 @@ class DXZF(BaseGenerator):
         """
         stock_df_new = self.get_dxzf_stage(stock_df)
         total_equity = self.get_total_equity()
-        print(stock_df_new.columns)
-        print(total_equity.columns)
         stock_df_new = stock_df_new.merge(total_equity, how='left', on='stock_code')
         stock_df_new['gap'] = (pd.to_datetime(stock_df_new['date'])
                                - pd.to_datetime(stock_df_new['declare_date'])).apply(lambda x: x.days)

@@ -195,3 +195,23 @@ def backtest(score, ret, index_ret, name, k=0):
     index = pd.MultiIndex.from_product([a, b], names=['score', 'period'])
     ret_risk_data = pd.DataFrame(ret_risk_data, columns=col, index=index)
     ret_risk_data.to_excel(f'./{name}/{name}_backtest.xlsx')
+
+
+from functools import reduce
+codes = ['300014.SZ', '002601.SZ', '601899.SH', '600588.SH', '002648.SZ']
+names = ['亿纬锂能', '龙佰集团', '紫金矿业', '用友网络', '卫星化学']
+codes_names = dict(zip(codes, names))
+cols = ['zdht', 'dxzf', 'gqjl', 'gfhg', 'jcjh', 'xsjj', 'skrbg', 'fhpx', 'jgh', 'ladc', 'nbfb', 'pxdm', 'wgcf', 'sszc', 'yjbg', 'djzy']
+for code, name in codes_names.items():
+    print(code, name)
+    stock_df_all2 = [x.rename(y).reset_index() for x, y in zip(stock_df_all, cols)]
+    stock_dfs = [x[x['stock_code'] == code] for x in stock_df_all2]
+    stocks = reduce(lambda x, y: x.merge(y, on=['stock_code', 'date'], how='outer'), stock_dfs).sort_values('date').reset_index(drop=True).iloc[12:1810].set_index(['stock_code', 'date']).ffill().fillna(0.0)
+    stocks['all'] = stocks.sum(axis=1)
+    yjbg.get_price(stock_list=[code])
+    yjbg.price_detail = yjbg.price_detail.reset_index()[yjbg.price_detail.reset_index()['stock_code'] == code]
+    price_detail = yjbg.get_type_ret().set_index(['stock_code', 'date'])
+    stock_df_price = pd.concat([stocks, price_detail], axis=1)
+    stock_df_price[stocks.columns] = stock_df_price[stocks.columns].ffill()
+    stock_df_price[price_detail.columns] = stock_df_price[price_detail.columns].bfill()
+    stock_df_price.to_csv(f"{code.split('.')[0]}-{name}.xlsx")

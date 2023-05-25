@@ -141,7 +141,8 @@ def plot(series_lst, name):
         plt.plot(series, label=series_name)
     plt.title(name)
     plt.legend()
-    plt.savefig(f"./{name}/{name}.png")
+    name1 = name.split('-')[0]
+    plt.savefig(f"./{name1}/{name}.png")
 
 
 def ret_risk(asset_ret, index_ret):
@@ -184,7 +185,7 @@ def backtest(score, ret, index_ret, name, k=0):
             # print('port_ts, asset_ret')
             # print(port_ts.T.sort_values('2018-01-02').T, asset_ret.iloc[:50])
             asset_cum.update({str(i) + '-' + str(m): cum(asset_ret)})
-            plot({'asset': cum(asset_ret), 'index': cum(index_ret)}, name + str(i) + '-' + str(m))
+            plot({'asset': cum(asset_ret), 'index': cum(index_ret)}, name + '-' + str(i) + '-' + str(m))
             ret_risk_data.append(ret_risk(np.log(asset_ret+1), np.log(index_ret+1)))
     asset_cum.update({'index': cum(index_ret)})
     plot(asset_cum, name)
