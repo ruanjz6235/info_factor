@@ -376,8 +376,6 @@ class DXZF(BaseGenerator):
         """
         stock_df_new = self.get_dxzf_stage(stock_df)
         total_equity = self.get_total_equity()
-        print(stock_df_new.columns)
-        print(total_equity.columns)
         stock_df_new = stock_df_new.merge(total_equity, how='left', on='stock_code')
         stock_df_new['gap'] = (pd.to_datetime(stock_df_new['date'])
                                - pd.to_datetime(stock_df_new['declare_date'])).apply(lambda x: x.days)
@@ -654,7 +652,7 @@ class GFHG(BaseGenerator):
             df11 = df11.groupby(['stock_code', 'date']).apply(
                 lambda x: x[x['count'] == max(x['count'])]).reset_index(drop=True)
             del df11['count']
-            print(df1[df1['stock_code'] == '603801.SH'].sort_values(['date']))
+            # print(df1[df1['stock_code'] == '603801.SH'].sort_values(['date']))
             df_new = pd.concat([df10, df11, df2.reset_index()])
             df_new = df_new.set_index(['stock_code', 'date'])
             codes_date = df.groupby(['stock_code', 'date'])['step'].count()
@@ -663,7 +661,7 @@ class GFHG(BaseGenerator):
 
         stock_df_new = get_last_action(stock_df_new)
         stock_df_new = stock_df_new.merge(self.price_detail, on=['stock_code', 'date'], how='left')
-        print(stock_df_new[stock_df_new['stock_code'] == '603801.SH'].sort_values(['date']))
+        # print(stock_df_new[stock_df_new['stock_code'] == '603801.SH'].sort_values(['date']))
         return stock_df_new
 
     def map_data(self, x, *args):
@@ -2209,4 +2207,3 @@ class ZHPJ(BaseGenerator):
         df_ret = self.get_stock_next_ret(stock_df)
         df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
         return df_ret_index, count_df, stock_df
-
