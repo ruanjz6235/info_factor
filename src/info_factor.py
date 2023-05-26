@@ -148,10 +148,10 @@ class BaseGenerator:
         score = stock_df.drop_duplicates().groupby(['stock_code', 'date'])['score'].sum().unstack([-2])
         score_new = self.complete_data(score, fillna=0)
         for ll in range(1, len(score_new)):
-            if score_new.index[ll - 1] in self.tradeday:
+            if score_new.index[ll] in self.tradeday:
                 score_new.iloc[ll] = score_new.iloc[ll - 1] * 0.8 + score_new.iloc[ll]
             else:
-                score_new.iloc[ll] = score_new.iloc[ll - 1]
+                score_new.iloc[ll] = score_new.iloc[ll - 1] + score_new.iloc[ll]
         return score_new.stack()
 
     def get_next_day(self, stock_df):
