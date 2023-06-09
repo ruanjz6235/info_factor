@@ -2137,16 +2137,12 @@ if __name__ == '__main__':
         stock_df_price.to_excel(f"{code.split('.')[0]}.xlsx")
 
     # 衰减分计算
-    a = pd.read_feather('stock_df_no_decay_all.feather')
-    a = a[(a['date'] >= '2018-01-01') & (a['date'] <= '2023-06-06')]
-
     c = a[['stock_code', 'date', 'score']]
     bg = ZHPJ(dates=['2018-01-01', '2023-06-02'])
-    bg.get_price(stock_list=['000300.SH'])
     c1 = bg.get_decay_score(c, norm=False)
     c2 = bg.data_process(c1.copy())
-    c1.columns = ['date', 'stock_code', 'decay_score']
-    c2.columns = ['date', 'stock_code', 'norm_decay_score']
+    c1.columns = ['stock_code', 'date', 'decay_score']
+    c2.columns = ['stock_code', 'date', 'norm_decay_score']
     c1['norm_decay_score'] = c2['norm_decay_score']
     c1.to_feather(r'decay_score.feather')
 
@@ -2156,14 +2152,14 @@ if __name__ == '__main__':
     a_index = []
     for i in range(5):
         a_tmp = a_new[(a_new['norm_score'] >= i) & (a_new['norm_score'] <= (i + 1))]
-        a_index.append([round(a_tmp['score'].min(), 2), round(a_tmp['score'].max(), 2)])
+        a_index.append([a_tmp['score'].min(), a_tmp['score'].max()])
 
     c_new = c1[['stock_code', 'date', 'decay_score', 'norm_decay_score']]
     c_new['norm_decay_score'] = c_new['norm_decay_score'] + 2.5
     c_index = []
     for i in range(5):
         c_tmp = c_new[(c_new['norm_decay_score'] >= i) & (c_new['norm_decay_score'] <= (i + 1))]
-        c_index.append([round(c_tmp['decay_score'].min(), 2), round(c_tmp['decay_score'].max(), 2)])
+        c_index.append([c_tmp['decay_score'].min(), c_tmp['decay_score'].max()])
 
     bg.get_price(stock_list=a_new['stock_code'].drop_duplicates().tolist())
     bg.backtest(stock_df=a_new[['stock_code', 'date', 'norm_score']].rename(columns={'norm_score': 'score'}),
@@ -2171,7 +2167,7 @@ if __name__ == '__main__':
     bg.backtest(stock_df=c_new[['stock_code', 'date', 'norm_decay_score']].rename(columns={'norm_decay_score': 'score'}),
                 decay='decay', labels=c_index)
 
-    bg.backtest(stock_df=a_new[['stock_code', 'date', 'norm_score']].rename(columns={'norm_score': 'score'}),
-                decay='no_decay', labels=a_index)
-    bg.backtest(stock_df=c_new[['stock_code', 'date', 'norm_decay_score']].rename(columns={'norm_decay_score': 'score'}),
-                decay='decay', labels=c_index)
+
+
+
+
