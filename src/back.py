@@ -138,6 +138,8 @@ def plot(series_lst, name):
     plt.figure(figsize=(15, 8))
     plt.rcParams["font.family"] = 'Songti SC'
     for series_name, series in series_lst.items():
+        if series_name.__contains__('count'):
+            continue
         plt.plot(series, label=series_name)
     plt.title(name)
     plt.legend()
@@ -167,28 +169,35 @@ def ret_risk(asset_ret, index_ret):
     return [annual_ret, annual_excess_ret, beta, alpha, sharpe, ir, mdd] + freq_ret
 
 
-def backtest(score, ret, index_ret, name, k=0):
+def backtest(score, ret, index_ret, name, k=0, decay='decay'):
+    """
+
+    :param score:
+    :param ret:
+    :param index_ret:
+    :param name:
+    :param k:
+    :param decay: 'decay' or 'no_decay'
+    :return:
+    """
     ret_risk_data = []
     x, y = np.floor(score.min().min()), np.floor(score.max().max())
     asset_cum = {}
-    for i in range(int(x), int(y)+1):  # 0-1, 1-2, 2-3, 3-4, 4-5
-        for m in [1, 3, 5, 10, 20]:  # 一日、三日、五日、十日、二十日持仓
+    for m in [1, 3, 5, 10, 20]:  # 一日、三日、五日、十日、二十日持仓
+        sub_asset_cum = {}
+        for i in range(int(x), int(y)+1):  # 0-1, 1-2, 2-3, 3-4, 4-5
             port_ts = resample_data(get_port_ts(score, i), m, k)
-            # print('port_ts, ret', port_ts, ret, port_ts.sum(axis=1))
-            # port_ts.to_csv('a.csv')
-            # print(port_ts.iloc[1].values)
-            # print(port_ts.columns)
-            # ret1 = ret[port_ts.columns[:-1]]
-            # print(ret1.iloc[1].values)
-            # print(ret1.iloc[1].values[port_ts.iloc[1].values[:-1] == 0.25])
             asset_ret = (port_ts.shift(1) * ret).sum(axis=1)
-            # print('port_ts, asset_ret')
-            # print(port_ts.T.sort_values('2018-01-02').T, asset_ret.iloc[:50])
-            asset_cum.update({str(i) + '-' + str(m): cum(asset_ret)})
-            plot({'asset': cum(asset_ret), 'index': cum(index_ret)}, name + '-' + str(i) + '-' + str(m))
+            asset_count = port_ts[port_ts != 0].count(axis=1)
+            sub_asset_cum.update({str(i) + '-' + str(m): cum(asset_ret),
+                                  str(i) + '-' + str(m) + '-count': asset_count})
+            plot({'asset': cum(asset_ret), 'index': cum(index_ret)}, name + '-' + decay + '-' + str(i) + '-' + str(m))
             ret_risk_data.append(ret_risk(np.log(asset_ret+1), np.log(index_ret+1)))
+        asset_cum.update(sub_asset_cum)
+        plot(sub_asset_cum, name + '-' + decay + '-' + 'all' + '-' + str(m))
     asset_cum.update({'index': cum(index_ret)})
-    plot(asset_cum, name)
+    pd.DataFrame(asset_cum).to_excel(f"./{name}/{name + '-' + decay}_backtest_detail.xlsx")
+    plot(asset_cum, name + '-' + decay)
     col = ['年化收益率', '超额年化收益', '夏普比率', '最大回撤', 'Alpha', 'Beta', '信息比率',
            '日胜率/日平均涨幅', '日超额胜率/日平均超跌涨幅', '周胜率/周平均涨幅', '周超额胜率/周平均超跌涨幅',
            '月胜率/月平均涨幅', '月超额胜率/月平均超跌涨幅', '年胜率/年平均涨幅', '年超额胜率/年平均超额涨幅']
@@ -196,4 +205,43 @@ def backtest(score, ret, index_ret, name, k=0):
     b = ['1', '3', '5', '10', '20']
     index = pd.MultiIndex.from_product([a, b], names=['score', 'period'])
     ret_risk_data = pd.DataFrame(ret_risk_data, columns=col, index=index)
-    ret_risk_data.to_excel(f'./{name}/{name}_backtest.xlsx')
+    ret_risk_data.to_excel(f"./{name}/{name + '-' + decay}_backtest.xlsx")
+
+
+
+def data_process(stock_df):
+    """
+    调整极值、去缺失值、标准化，数据预处理三件套
+    :param stock_df:
+    :return:
+    """
+    score_mean, score_std = stock_df['score'].mean(), stock_df['score'].std()
+    score_min, score_max = score_mean - 2 * score_std, score_mean + 2 * score_std
+
+    def extreme_process(x, score_min, score_max):
+        if x < score_min:
+            return score_min
+        elif x > score_max:
+            return score_max
+        else:
+            return x
+
+    stock_df['score'] = stock_df['score'].apply(extreme_process,
+                                                score_min=score_min,
+                                                score_max=score_max)
+    stock_df = stock_df[~stock_df['score'].isna()]
+    stock_df['score'] = stock_df['score'] * 2.5 / max(abs(score_min), abs(score_max))
+    return stock_df
+
+
+from glob import glob
+stock_df_no_decay = []
+for i in glob(r'./data/*.feather'):
+    if i.__contains__('decay'):
+        continue
+    stock_df = pd.read_feather(i)
+    col = stock_df.columns[-1]
+    stock_df = stock_df.rename(columns={col: 'score'})
+    if abs(stock_df['score'].abs().max() - 2.5) > 0.01:
+        stock_df = data_process(stock_df)
+    stock_df_no_decay.append(stock_df)

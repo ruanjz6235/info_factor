@@ -4,7 +4,8 @@ import re
 from DataAPI.openapi.open_api import OpenAPI
 from functools import reduce
 import datetime
-# from backtest import backtest
+from backtest import backtest
+
 # from const import periods
 periods = [1, 3, 5, 10, 20]
 
@@ -135,6 +136,7 @@ class BaseGenerator:
             stock_df['score'] = stock_df['score'].apply(self.map_data, args=args)
         else:
             stock_df['score'] = stock_df.apply(self.map_data, axis=1, args=args)
+        stock_df = self.data_process(stock_df)
         return stock_df
 
     def complete_data(self, df, fillna=None):
@@ -152,7 +154,9 @@ class BaseGenerator:
                 score_new.iloc[ll] = score_new.iloc[ll - 1] * 0.8 + score_new.iloc[ll]
             else:
                 score_new.iloc[ll] = score_new.iloc[ll - 1]
-        return score_new
+        stock_df_new = score_new.stack().rename('score').reset_index()
+        stock_df_new = self.data_process(stock_df_new)
+        return stock_df_new
 
     def get_next_day(self, stock_df):
         price_detail = self.price_detail['close'].unstack().reset_index().rename(columns={'index': 'stock_code'})
@@ -183,7 +187,7 @@ class BaseGenerator:
     def get_stock_next_ret(self, stock_df_old, codes=None, decay=False):
         stock_df = stock_df_old.copy()
         if decay:
-            stock_df = self.get_decay_score(stock_df).reset_index()
+            stock_df = self.get_decay_score(stock_df)
         if codes:
             stock_df = stock_df[stock_df['stock_code'].isin(codes)]
         next_day = self.get_next_day(stock_df[['stock_code', 'date']])
@@ -195,7 +199,7 @@ class BaseGenerator:
         df_ret = stock_df.merge(ret, on=['stock_code', 'date'], how='left')
         return df_ret
 
-    @ staticmethod
+    @staticmethod
     def get_next_index(df_ret, name):
         def get_index(df):
             s1 = df.count()
@@ -210,20 +214,24 @@ class BaseGenerator:
         count_df.to_excel(f'./{name}/{name}_count_df.xlsx')
         return df_ret_index, count_df
 
-    def backtest(self, stock_df):
+    def backtest(self, stock_df, decay='decay'):
+        """
+
+        :param stock_df:
+        :param decay: 'decay' or 'no_decay'
+        :return:
+        """
         print(self.__class__.__name__, 'backtest')
         stock_df = stock_df[(stock_df['date'] >= self.dates[0]) & (stock_df['date'] <= self.dates[1])]
         score = stock_df.drop_duplicates().set_index(['stock_code', 'date'])['score'].unstack([-2])
-        score_new = self.complete_data(score, fillna=0)
-        for i in range(1, len(score_new)):
-            score_new.iloc[i] = score_new.iloc[i - 1] * 0.8 + score_new.iloc[i]
         index_ret = get_price('000300.SH',
                               self.dates[0],
                               self.dates[1],
                               '1d',
                               ['close'],
                               fq='pre')['close'].pct_change().fillna(0)
-        backtest(score_new, self.price_detail['close'].unstack([-2]).pct_change().fillna(0), index_ret, self.__class__.__name__)
+        price_detail = self.price_detail['close'].unstack([-2]).pct_change().fillna(0)
+        backtest(score, price_detail, index_ret, self.__class__.__name__, decay=decay)
 
     def __call__(self, *args, **kwargs):
         self.get_price(stock_list=self.stock_df['stock_code'].drop_duplicates().tolist())
@@ -233,6 +241,31 @@ class BaseGenerator:
         df_ret = self.get_stock_next_ret(stock_df)
         df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
         return df_ret_index, count_df, stock_df
+
+    @staticmethod
+    def data_process(stock_df):
+        """
+        调整极值、去缺失值、标准化，数据预处理三件套
+        :param stock_df:
+        :return:
+        """
+        score_mean, score_std = stock_df['score'].mean(), stock_df['score'].std()
+        score_min, score_max = score_mean - 2 * score_std, score_mean + 2 * score_std
+
+        def extreme_process(x, score_min, score_max):
+            if x < score_min:
+                return score_min
+            elif x > score_max:
+                return score_max
+            else:
+                return x
+
+        stock_df['score'] = stock_df['score'].apply(extreme_process,
+                                                    score_min=score_min,
+                                                    score_max=score_max)
+        stock_df = stock_df[~stock_df['score'].isna()]
+        stock_df['score'] = stock_df['score'] * 2.5 / max(abs(score_min), abs(score_max))
+        return stock_df
 
 
 # %%重大合同
@@ -254,7 +287,7 @@ class ZDHT(BaseGenerator):
         return total_income
 
     def cal_raw_data(self, stock_df, **kwargs):
-        stock_df = stock_df[stock_df['重大合同发布时间'] <= self.dates[1]]
+        # stock_df = stock_df[stock_df['重大合同发布时间'] <= self.dates[1]]
         stock_df = stock_df.groupby(self.col)['重大合同金额'].sum().reset_index()
         stock_df['last_year'] = (pd.to_datetime(stock_df['重大合同发布时间']) - pd.DateOffset(years=1)).apply(lambda x: x.year)
         total_income = self.get_total_income(stock_df)
@@ -943,7 +976,7 @@ class SKRBG(BaseGenerator):
 
     def cal_raw_data(self, stock_df, **kwargs):
         stock_df = stock_df[self.col].rename(columns={'股票代码': 'stock_code', '实控人变更公告日期': 'date'})
-        stock_df = stock_df[stock_df['date'] < self.dates[1]]
+        # stock_df = stock_df[stock_df['date'] < self.dates[1]]
         return stock_df
 
     def map_data(self, x, *args):
@@ -1166,7 +1199,7 @@ class YJBG(BaseGenerator):
 
     def cal_raw_data(self, stock_df, **kwargs):
         stock_df['declaredate_stk428'] = stock_df['declaredate_stk428'].astype(str)
-        stock_df = stock_df[stock_df['declaredate_stk428'] < self.dates[1]]
+        # stock_df = stock_df[stock_df['declaredate_stk428'] < self.dates[1]]
         stock_df['declaredate_stk428'] = stock_df[['thscode', 'declaredate_stk428']].apply(self.get_next_day, axis=1)
         stock_df['gap'] = stock_df['declaredate_stk428'].astype('datetime64[ns]') - stock_df['f001d_stk428'].astype(
             'datetime64[ns]')
@@ -2118,86 +2151,31 @@ class ZHPJ(BaseGenerator):
 
     def cal_raw_data(self, **kwargs):
         stock_df_all = []
-        zdht = ZDHT(dates=['20180101', '20230517'])
-        df_ret_index, count_df, stock_df = zdht()
-        zdht.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        dxzf = DXZF(dates=['2018-01-01', '2023-05-19'])
-        df_ret_index, count_df, stock_df = dxzf()
-        dxzf.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        gqjl = GQJL(dates=['2018-01-01', '2023-05-19'])
-        df_ret_index, count_df, stock_df = gqjl()
-        gqjl.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        gfhg = GFHG(dates=['2018-01-01', '2023-05-19'])
-        df_ret_index, count_df, stock_df = gfhg()
-        gfhg.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        jcjh = JCJH(dates=['20180101', '20230519'])
-        df_ret_index, count_df, stock_df = jcjh()
-        jcjh.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        zcjh = ZCJH(dates=['20180101', '20230519'])
-        df_ret_index, count_df, stock_df = zcjh()
-        zcjh.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        xsjj = XSJJ(dates=['20180101', '20230519'])
-        df_ret_index, count_df, stock_df = xsjj()
-        xsjj.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        skrbg = SKRBG(dates=['20180101', '20230519'])
-        df_ret_index, count_df, stock_df = skrbg()
-        skrbg.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        fhpx = FHPX(dates=['2018-01-01', '2023-05-19'])
-        df_ret_index, count_df, stock_df = fhpx()
-        fhpx.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        jgh = JGH(dates=['2018-01-01', '2023-05-19'])
-        df_ret_index, count_df, stock_df = jgh()
-        jgh.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        ladc = LADC(dates=['20180101', '20230519'])
-        df_ret_index, count_df, stock_df = ladc()
-        ladc.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        nbfb = NBFB(dates=['20180101', '20230519'])
-        df_ret_index, count_df, stock_df = nbfb()
-        nbfb.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        pxdm = PXDM(dates=['20180101', '20230519'])
-        df_ret_index, count_df, stock_df = pxdm()
-        pxdm.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        wgcf = WGCF(dates=['2018-01-01', '2023-05-19', '2017-06-01'])
-        df_ret_index, count_df, stock_df = wgcf()
-        wgcf.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        sszc = SSZC(dates=['2018-01-01', '2023-05-19', '2017-06-01'])
-        df_ret_index, count_df, stock_df = sszc()
-        sszc.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-
-        yjbg = YJBG(dates=['2018-01-01', '2023-05-19'])
-        df_ret_index, count_df, stock_df = yjbg()
-        yjbg.backtest(stock_df)
-        stock_df_all.append(self.get_decay_score(stock_df))
-        return pd.concat(stock_df_all, axis=1).sum(axis=1).rename('score').reset_index()
+        stock_df_no_decay = []
+        cols = ['zdht', 'dxzf', 'gqjl', 'gfhg', 'jcjh', 'zcjh', 'xsjj', 'skrbg', 'fhpx', 'jgh', 'ladc', 'nbfb', 'pxdm',
+                'wgcf', 'sszc', 'yjbg', 'djzy']
+        # cols = ['zcjh']
+        days = [['20180101', '20230531'], ['2018-01-01', '2023-05-31'], ['2018-01-01', '2023-05-31'],
+                ['2018-01-01', '2023-05-31'], ['20180101', '20230531'], ['20180101', '20230531'],
+                ['20180101', '20230531'], ['20180101', '20230531'], ['2018-01-01', '2023-05-31'],
+                ['2018-01-01', '2023-05-31'], ['20180101', '20230531'], ['20180101', '20230531'],
+                ['20180101', '20230531'], ['2018-01-01', '2023-05-31', '2017-06-01'],
+                ['2018-01-01', '2023-05-31', '2017-06-01'], ['2018-01-01', '2023-05-31'], ['2018-01-01', '2023-05-31']]
+        for col, dates in zip(cols, days):
+            class_name = col.upper()
+            print(class_name)
+            sub_bg = globals()[class_name](dates=dates)
+            df_ret_index, count_df, stock_df = sub_bg()
+            stock_df_decay = sub_bg.get_decay_score(stock_df)
+            sub_bg.backtest(stock_df, decay='no_decay')
+            sub_bg.backtest(stock_df_decay, decay='decay')
+            stock_df.rename(columns={'score': col}).to_feather(f"./data/{class_name}_stock_df.feather")
+            stock_df_decay.rename(columns={'score': col}).to_feather(f"./data/{class_name}_stock_df_decay.feather")
+            stock_df_no_decay.append(stock_df)
+            stock_df_all.append(stock_df_decay)
+        self.stock_df_no_decay = pd.concat(stock_df_no_decay)
+        self.stock_df_all = stock_df_all
+        return self.stock_df_no_decay
 
     def map_data(self, x, *args):
         return x
@@ -2206,7 +2184,8 @@ class ZHPJ(BaseGenerator):
         stock_df = self.cal_raw_data()
         stock_df = stock_df[['stock_code', 'date', 'score']]
         stock_df = stock_df.groupby(['stock_code', 'date'])['score'].sum().reset_index()
+        stock_df_decay = self.get_decay_score(stock_df)
         self.get_price(stock_list=stock_df['stock_code'].drop_duplicates().tolist())
         df_ret = self.get_stock_next_ret(stock_df)
         df_ret_index, count_df = self.get_next_index(df_ret, name=self.__class__.__name__)
-        return df_ret_index, count_df, stock_df
+        return df_ret_index, count_df, stock_df, stock_df_decay
